@@ -6,7 +6,6 @@ import json
 import os
 from dotenv import load_dotenv
 from uuid import UUID
-import requests
 import traceback
 load_dotenv()
 
@@ -63,6 +62,7 @@ class CompletionResponse(BaseModel):
     citations: list[str]
     object: str
     choices: list[Choice]
+
 class TopicFormat(BaseModel):
     topic_name: str
 
@@ -80,7 +80,8 @@ SONAR_API_KEY = os.getenv("SONAR_API_KEY")
 SONAR_API_URL = "https://api.perplexity.ai/chat/completions"
 
 async def classify_topic(question: str) -> str:
-    async with httpx.AsyncClient() as client:
+    print(f"Classifying topic: {question}")
+    try:
         payload = {
             "model": "sonar-pro",
             "messages": [
@@ -90,7 +91,7 @@ async def classify_topic(question: str) -> str:
                 },
                 {
                     "role": "user",
-                    "content": f"{question}"
+                    "content": question
                 }
             ],
             "max_tokens": 50,
@@ -104,33 +105,60 @@ async def classify_topic(question: str) -> str:
             "presence_penalty": 0,
             "frequency_penalty": 1,
             "response_format": {
-	    	    "type": "json_schema",
+                "type": "json_schema",
                 "json_schema": {"schema": TopicFormat.model_json_schema()},
             },
             "web_search_options": {"search_context_size": "low"}
         }
-        resp = await client.post(
-            SONAR_API_URL,
-            headers={
-                "Authorization": f"Bearer {SONAR_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json=payload
-        )
-    resp.raise_for_status()
-    result = resp.json()
-    output = CompletionResponse.model_validate(result)
-    topic = TopicFormat.model_validate(json.loads(output.choices[0].message.content))
-    return topic.topic_name
+        
+        print(f"\n=== Classification Request Details ===")
+        print(f"URL: {SONAR_API_URL}")
+        print(f"Payload: {json.dumps(payload, indent=2)}")
+
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.post(
+                    SONAR_API_URL,
+                    headers={
+                        "Authorization": f"Bearer {SONAR_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json=payload
+                )
+                print(f"\n=== Classification Response Details ===")
+                print(f"Status Code: {resp.status_code}")
+                print(f"Headers: {dict(resp.headers)}")
+                print(f"Response Text: {resp.text[:1000]}...")  # Print first 1000 chars of response
+                
+                resp.raise_for_status()
+                result = resp.json()
+                output = CompletionResponse.model_validate(result)
+                topic = TopicFormat.model_validate(json.loads(output.choices[0].message.content))
+                print(f"\n=== Classification Result ===")
+                print(f"Detected Topic: {topic.topic_name}")
+                return topic.topic_name
+            except httpx.HTTPError as http_err:
+                print(f"\n=== HTTP Error Details ===")
+                print(f"HTTP Error occurred: {http_err}")
+                print(f"Error Response: {getattr(http_err, 'response', None)}")
+                print(f"Request Info: {getattr(http_err, 'request', None)}")
+                raise
+    except Exception as e:
+        print("\n=== Exception Details ===")
+        print(f"Exception Type: {type(e).__name__}")
+        print(f"Exception Message: {str(e)}")
+        print("Full Traceback:")
+        traceback.print_exc()
+        raise
 
 async def query_sonar(question: str, domains: list) -> CompletionResponse:
     try:
         payload = {
-                "model": "sonar-deep-research",
+                "model": "sonar-pro",
                 "messages": [
                     {
                         "role": "user",
-                        "content": f"{question}"
+                        "content": question
                     }
                 ],
                 "max_tokens": 5000,
@@ -148,31 +176,54 @@ async def query_sonar(question: str, domains: list) -> CompletionResponse:
                 "include_citations": True
             }
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
-            resp = await client.post(
-                SONAR_API_URL,
-                headers={"Authorization": f"Bearer {SONAR_API_KEY}"},
-                json=payload
-            )
-        resp.raise_for_status()
-        result = resp.json()
-        print(result)
-        output = CompletionResponse.model_validate(result)
-        return output
+        print(f"\n=== HTTP Request Details ===")
+        print(f"URL: {SONAR_API_URL}")
+        print(f"Payload: {json.dumps(payload, indent=2)}")
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(3000.0)) as client:
+            try:
+                resp = await client.post(
+                    SONAR_API_URL,
+                    headers={"Authorization": f"Bearer {SONAR_API_KEY}"},
+                    json=payload
+                )
+                print(f"\n=== HTTP Response Details ===")
+                print(f"Status Code: {resp.status_code}")
+                print(f"Response Text: {resp.text}...")
+                
+                resp.raise_for_status()
+                result = resp.json()
+                output = CompletionResponse.model_validate(result)
+                return output
+            except httpx.HTTPError as http_err:
+                print(f"\n=== HTTP Error Details ===")
+                print(f"HTTP Error occurred: {http_err}")
+                print(f"Error Response: {getattr(http_err, 'response', None)}")
+                print(f"Request Info: {getattr(http_err, 'request', None)}")
+                raise
     except Exception as e:
-        print(traceback.print_exc())
+        print("\n=== Exception Details ===")
+        print(f"Exception Type: {type(e).__name__}")
+        print(f"Exception Message: {str(e)}")
+        print("Full Traceback:")
+        traceback.print_exc()
+        raise
 
 @app.post("/ask", response_model=QueryResponse)
 async def ask_medical_question(req: QueryRequest):
+    print("Received request")
     question = req.question
     try:
+        print("Classifying topic")
         topic = await classify_topic(question)
         domains = DOMAIN_FILTERS_BY_TOPIC.get(topic)
+        print("Domains", domains)
         if not domains:
             raise HTTPException(status_code=400, detail=f"Unknown topic: {topic}")
 
+        print("Querying Sonar")
         sonar_result = await query_sonar(question, domains)
-
+        print("Sonar result", sonar_result)
         return QueryResponse(
             topic=topic,
             domain_filter=domains,

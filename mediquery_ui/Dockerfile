@@ -1,22 +1,22 @@
 # Use the latest LTS version of Node
-FROM node:20-alpine
+FROM node:18-alpine
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Install dependencies
 COPY package*.json ./
 RUN npm install
 
-# Copy rest of the code
+# Copy the rest of the application
 COPY . .
 
-# Build the Next.js app
+# Build the application
 RUN npm run build
 
-# Expose the Next.js port
+# Expose the port the app runs on
 EXPOSE 3000
 
-# Start Next.js app in production mode
-CMD ["npm", "start"]
+# Command to run the application
+CMD ["npm", "run", "dev"]
 

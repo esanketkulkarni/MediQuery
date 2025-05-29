@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./mediquery_ui
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./mediquery_ui:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./Mediquery_sonar_api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - SONAR_API_KEY=${SONAR_API_KEY}
+    volumes:
+      - ./Mediquery_sonar_api:/app
+    command: uvicorn mediquery_service:app --host 0.0.0.0 --port 8000 --reload 

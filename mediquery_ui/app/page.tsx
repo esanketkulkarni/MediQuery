@@ -79,13 +79,13 @@ export default function MediQueryUI() {
       });
 
       if (!res.ok) {
-        throw new Error(`HTTP error! Status: ${res.status}`);
+        throw new Error('Could not find any data');
       }
 
       const data = await res.json();
       setResult(data);
     } catch (err) {
-      setError((err as Error).message);
+      setError('Could not find any data');
     } finally {
       setLoading(false);
     }
